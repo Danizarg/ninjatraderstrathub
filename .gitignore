@@ -1,0 +1,11 @@
+.runtime/
+artifacts/
+*.user
+*.suo
+*.log
+*.csv
+*.db
+*.db-shm
+*.db-wal
+**/obj/
+**/bin/
