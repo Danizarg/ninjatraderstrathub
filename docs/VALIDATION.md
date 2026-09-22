@@ -20,3 +20,24 @@ checks. No ATL strategy was enabled and no broker/account settings were changed.
 The execution exporter still needs a backtest or simulation run to validate its
 records against NinjaTrader's execution history. It does not feed the binary
 demo's learning engine.
+
+## Visual desktop app — 2026-09-22
+
+- Built the native WPF Windows x64 EXE using the .NET Framework compiler.
+- Passed 15 desktop data checks: chronological equity and drawdown, breakeven
+  win rate, culture-independent numbers, malformed JSON, empty workspaces,
+  quoted CSV fields and newlines, partially written execution records,
+  incompatible headers, Windows command quoting, and NinjaTrader subfolder resolution.
+- Re-ran the Windows installer/demo smoke checks successfully.
+- Opened the desktop app on Windows and verified it loaded existing demo runs.
+- Clicked **Run demo** in the GUI: process completed without a console window;
+  the dashboard selected the new run and showed 100 records, $2,800 synthetic
+  net P&L, and the recorded `INSUFFICIENT_DATA` learning status.
+- Fixed the GUI child process's Windows PowerShell module search path after
+  reproducing a missing `Get-FileHash` error when inherited from PowerShell 7.
+- Visually checked the trades table and NinjaTrader setup page. Saved corrected
+  workspace settings through the GUI and verified persistence.
+
+The desktop GUI does not turn the synthetic engine into an adaptive live-trading
+system. No trading accounts were connected and no strategies were enabled for
+these desktop checks.

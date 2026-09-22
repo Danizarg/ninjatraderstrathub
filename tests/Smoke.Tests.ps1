@@ -38,5 +38,7 @@ if (-not $SkipDemo) {
     $trades = @(Get-ChildItem (Join-Path $runs[0].FullName 'demo-export') -Filter '*.json')
     Assert ($trades.Count -eq 100) 'Demo did not generate 100 synthetic records'
     Assert (Test-Path (Join-Path $runs[0].FullName 'ninjatrader\Strategies\ATL_ES_EMA_Trend_v1.cs')) 'Demo did not generate NinjaScript'
+    $metadata = Get-Content -LiteralPath (Join-Path $runs[0].FullName 'desktop-run.json') -Raw | ConvertFrom-Json
+    Assert ($metadata.learningStatus -eq 'INSUFFICIENT_DATA') 'Desktop run status was not preserved'
 }
 Write-Host 'PASS: script parsing, WhatIf, installation, idempotency, overwrite protection, invalid path, and demo checks.'

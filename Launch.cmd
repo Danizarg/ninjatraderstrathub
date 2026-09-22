@@ -1,7 +1,11 @@
 @echo off
 setlocal
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Start-Lab.ps1" %*
-set "lab_exit_code=%errorlevel%"
-echo.
-pause
-exit /b %lab_exit_code%
+if not exist "%~dp0AdaptiveTradingLab.exe" (
+    powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0app\Build.ps1"
+    if errorlevel 1 (
+        pause
+        exit /b 1
+    )
+)
+start "" "%~dp0AdaptiveTradingLab.exe"
+exit /b 0

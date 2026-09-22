@@ -1,22 +1,25 @@
 # Adaptive Trading Lab for Windows and NinjaTrader 8
 
-Windows launchers, an editable NinjaTrader strategy, and the original
-`AdaptiveTradingLab-windows-x64.zip` supplied for this repository.
+A native Windows desktop app with a results dashboard, equity chart, trade
+tables, NinjaTrader setup, and an execution viewer. Includes an editable
+NinjaTrader strategy and the original supplied binary demo.
 
 ## Quick start
 
 1. Download this repository as a ZIP and **extract all files**, or clone it.
-2. Double-click **Launch.cmd** to run the original 100-trade synthetic demo.
-   No separate .NET installation or SDK is needed. The bundled runtime is
-   unpacked to `.runtime` on first launch after its SHA-256 is checked.
-3. Double-click **Setup-NinjaTrader.cmd** to install **ATL_EMA_Trend** into
-   your NinjaTrader Documents folder.
+2. Double-click **AdaptiveTradingLab.exe** (or **Launch.cmd**) to open the visual
+   desktop app. Keep it with the `scripts` and `vendor` folders.
+3. Click **Run demo** to generate a synthetic run and show its results. Open the
+   **NinjaTrader** tab and click **Install strategy** to install **ATL_EMA_Trend**.
 4. In NinjaTrader, open **New > NinjaScript Editor** and press **F5**.
 5. Open **New > Strategy Analyzer**, select **ATL_EMA_Trend**, choose an
    instrument, historical date range and bars, then run a backtest.
 
-Requires x64 Windows supported by the bundled .NET 10 runtime and NinjaTrader 8
-for strategy use. The original package was tested on Windows with NinjaTrader
+The desktop app requires Windows x64 with .NET Framework 4.8 (also used by
+NinjaTrader 8). No SDK is needed to run the included EXE. Running the demo also
+requires Windows supported by its bundled .NET 10 runtime. That runtime is
+unpacked to `.runtime` on first use after its SHA-256 is checked.
+The original package was tested on Windows with NinjaTrader
 8.1.6.3. NinjaTrader uses .NET Framework; the demo's .NET 10 DLLs are kept outside
 NinjaTrader's `bin/Custom` directory.
 
@@ -24,17 +27,42 @@ NinjaTrader's `bin/Custom` directory.
 
 | Component | Behavior |
 | --- | --- |
-| `Launch.cmd` | Runs the supplied synthetic console demo; saves to `%LOCALAPPDATA%\AdaptiveTradingLab\runs` |
+| `AdaptiveTradingLab.exe` / `Launch.cmd` | Opens the graphical Windows app |
+| `app/` | Complete editable C# / WPF desktop source and build script |
+| `Run-Demo.cmd` | Optional terminal-only launcher for the original synthetic demo |
 | `Setup-NinjaTrader.cmd` | Copies one editable `.cs` strategy into your NinjaTrader installation |
 | `ninjatrader/Strategies/ATL_EMA_Trend.cs` | EMA crossover, ADX filter, ATR stop and target, configurable in NinjaTrader |
 | `scripts/Show-Telemetry.ps1` | Shows the latest execution CSV produced by the strategy |
 | `vendor/` | Unmodified binary package and its checksum |
 
-The supplied ZIP has **no application source code**, WPF interface, or functional
+The original supplied ZIP has **no engine source code** or functional
 learning/telemetry connection. Its synthetic run reports `INSUFFICIENT_DATA`.
-This repository preserves that demo and adds source for the Windows integration
-and native NinjaTrader strategy. Execution CSV files are **not automatically fed
+This repository adds a new WPF desktop interface with its full source, Windows
+integration, and a native NinjaTrader strategy. Execution CSV files are **not automatically fed
 into the binary demo**; there is no claim of an adaptive learning loop.
+
+## Visual app
+
+- **Overview:** select an existing run; view synthetic net P&L, trade count,
+  win rate, maximum drawdown, and a cumulative net P&L chart. Metrics are computed
+  from JSON records, ordered by exit time. Unreadable records are reported as
+  skipped, with partial totals clearly marked.
+- **Demo trades:** inspect and sort the selected run's records.
+- **NinjaTrader:** detect the user folder and running process, install the strategy,
+  and follow the compile/backtest steps. Detection is local; it does not imply an
+  account connection or successful NinjaScript compilation.
+- **Executions:** select an exported CSV and inspect complete fills. Click
+  **Refresh** after NinjaTrader writes more data. There is no background file watcher.
+- **Settings & activity:** choose output and export folders, save settings, and
+  read operation output. Settings are saved to
+  `%LOCALAPPDATA%\AdaptiveTradingLab\desktop-settings.json`; the activity log is
+  `desktop.log` beside it. Existing runs are preserved.
+
+The app remains responsive while the demo runs, captures terminal output in the
+activity tab, and shows errors in the window. New runs include a small
+`desktop-run.json` status file. Older runs still load but may lack learning status.
+The NinjaTrader folder picker recognizes a selected subfolder (such as a workspace
+template) and resolves it to the parent NinjaTrader user folder.
 
 ## Strategy behavior
 
@@ -78,7 +106,7 @@ Documents locations. For a different NinjaTrader user directory:
 
 ```powershell
 .\Setup-NinjaTrader.cmd -NinjaTraderHome "D:\Trading\NinjaTrader 8"
-.\Launch.cmd -OutputRoot "D:\Trading Lab Data"
+.\Run-Demo.cmd -OutputRoot "D:\Trading Lab Data"
 ```
 
 Identical installs are left alone. A different existing `ATL_EMA_Trend.cs` is
@@ -92,13 +120,20 @@ instances, then remove ATL_EMA_Trend using NinjaScript Editor and compile.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Smoke.Tests.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Desktop.Tests.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-NinjaTraderCompile.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\app\Build.ps1
 ```
 
 The smoke test exercises the real packaged demo and an isolated mock installation,
 including paths with spaces and overwrite protection. The compile check uses the
 installed NinjaTrader assemblies and the Windows .NET Framework compiler, writing
 only to ignored `artifacts/`. Final NinjaScript compilation is done in NinjaTrader.
+Close the desktop app before rebuilding its EXE. `Build.ps1` uses Windows'
+included .NET Framework C# compiler and embeds the XAML; no NuGet restore or
+Visual Studio installation is needed. The desktop executable is included in Git
+so a download is ready to launch.
+
 No proprietary NinjaTrader binaries, account data, or generated telemetry belong
 in this repository. The original demo cannot be rebuilt without its missing source.
 
