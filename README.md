@@ -111,3 +111,17 @@ The native compile check reads installed NinjaTrader assemblies and writes only
 under `artifacts/`; full NinjaScript compilation and strategy backtesting remain
 inside NinjaTrader. No proprietary NinjaTrader assemblies or personal reports are
 included in this repository.
+
+## Low-trade recovery
+
+**Loosen for more trades** works even with zero completed trades. It offers a
+lower ADX threshold, an ADX-disabled diagnostic candidate, and faster EMA periods.
+Each change is explained, preserves stop/target multipliers, and remains untested.
+Select a proposal and **Create selected version**, or enter custom parameters.
+The version panel provides the install / F5 / Strategy Analyzer rerun steps.
+Actual backtests still run in NinjaTrader; Refresh imports their saved reports.
+
+Zero trades can also indicate missing historical data, an incorrect contract,
+session restrictions or runtime errors. The recovery explanation flags those
+possibilities. More trades are not guaranteed, and the existing 50-trade,
+cost and later-validation requirements for performance recommendations remain.

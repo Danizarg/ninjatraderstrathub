@@ -41,6 +41,7 @@
     </UniformGrid>
     <Border Style="{StaticResource Card}" Margin="0,0,0,16"><TextBlock x:Name="NativeDetails" Text="No native report selected." LineHeight="23"/></Border>
     <StackPanel Orientation="Horizontal" Margin="0,0,0,16"><Button x:Name="SuggestButton" Content="Suggest 20-second changes" Background="#62E2BD" Foreground="#10251E"/><Button x:Name="AutoCreateButton" Content="Auto-create candidate versions" Margin="12,0,0,0"/></StackPanel>
+    <Button x:Name="LoosenButton" Content="Loosen for more trades (including zero trades)" HorizontalAlignment="Left" Margin="0,0,0,16"/>
     <TextBlock Text="Compare with another saved backtest" FontSize="18" Margin="0,0,0,10"/><ComboBox x:Name="ComparisonPicker" DisplayMemberPath="Label"/>
     <Border Style="{StaticResource Card}" Margin="0,12,0,0"><TextBlock x:Name="ComparisonText" Text="Select a comparison run." LineHeight="23"/></Border>
    </StackPanel></ScrollViewer></TabItem>
@@ -54,6 +55,7 @@
     <Button x:Name="CustomVersionButton" Content="Create custom version" HorizontalAlignment="Left" Margin="0,0,0,20"/>
     <TextBlock Text="Version library" FontSize="20" Margin="0,0,0,10"/><ComboBox x:Name="VersionPicker" DisplayMemberPath="Label"/>
     <Border Style="{StaticResource Card}" Margin="0,12,0,12"><TextBlock x:Name="VersionDetails" Text="No versions created." LineHeight="22"/></Border>
+    <Border Style="{StaticResource Card}" Margin="0,0,0,12"><TextBlock x:Name="RerunInstructions" Text="Select a version to prepare its next backtest." LineHeight="22"/></Border>
     <Expander Header="Review generated NinjaScript source" Foreground="#E7EDF6" Margin="0,0,0,12"><TextBox x:Name="VersionSourceBox" Height="260" IsReadOnly="True" FontFamily="Consolas" FontSize="12" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/></Expander>
     <WrapPanel Margin="0,0,0,16"><Button x:Name="InstallVersionButton" Content="Install separate version" Margin="0,0,10,8"/><Button x:Name="OpenLibraryButton" Content="Open library folder" Margin="0,0,10,8"/><Button x:Name="RecommendButton" Content="Find tested improvement" Margin="0,0,0,8"/></WrapPanel>
     <Border Style="{StaticResource Card}"><TextBlock x:Name="RecommendationText" Text="No automatic recommendation yet. Create candidates, test in NinjaTrader, then refresh reports. The original strategy is kept." LineHeight="22"/></Border>

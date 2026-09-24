@@ -28,3 +28,11 @@ with F5 there, backtested or enabled. No new strategy performance is claimed.
 Recommendations are gated by recorded test evidence; native Strategy Analyzer
 runs still require user action in NinjaTrader. The new application must be
 explicitly launched/deployed to replace the old app's displayed data.
+
+## Low-trade recovery update
+
+Passed 43 checks including zero-trade candidate creation, lower/disabled ADX,
+faster EMA windows, unchanged stop/target multipliers, minimum-bound no-op
+suppression, missing-data messaging and preservation of performance sample gates.
+A generated strategy also passed the installed NinjaTrader reference compilation.
+No native backtest was automatically started or deployed app replaced.

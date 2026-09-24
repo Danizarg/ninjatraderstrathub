@@ -33,6 +33,7 @@ namespace AdaptiveTradingLab.Desktop
             Get<ComboBox>("VersionPicker").SelectionChanged += (s, e) => ShowVersion();
             Get<ComboBox>("StrategyFilePicker").SelectionChanged += (s, e) => ShowStrategyFile();
             Get<Button>("ImportReportButton").Click += (s, e) => ImportNative();
+            Get<Button>("LoosenButton").Click += (s, e) => Suggest(false, true);
             Get<Button>("SuggestButton").Click += (s, e) => Suggest(false);
             Get<Button>("AutoCreateButton").Click += (s, e) => Suggest(true);
             Get<Button>("CreateProposalButton").Click += (s, e) => CreateProposal();
@@ -126,13 +127,14 @@ namespace AdaptiveTradingLab.Desktop
             if (Baseline == null) throw new InvalidOperationException("Select a native backtest first.");
             if (!Baseline.IsTwentySeconds || Baseline.Parameters == null) throw new InvalidOperationException("Select an ATL EMA-family result on 20-second bars.");
         }
-        private void Suggest(bool createAll)
+        private void Suggest(bool createAll, bool loosen = false)
         {
             try
             {
-                RequireBaseline(); proposals = AdaptationEngine.Propose(Baseline);
+                RequireBaseline(); proposals = loosen ? AdaptationEngine.Loosen(Baseline) : AdaptationEngine.Propose(Baseline);
                 Get<ComboBox>("ProposalPicker").ItemsSource = proposals; Get<ComboBox>("ProposalPicker").SelectedIndex = proposals.Count == 0 ? -1 : 0;
                 Get<TabControl>("Pages").SelectedItem = Get<TabItem>("AdaptationTab");
+                if (proposals.Count == 0) Text("ProposalExplanation", "No further loosening available: ADX is already zero and EMA periods are at their minimum. Check contract, historical data and trading hours before rerunning.");
                 if (createAll)
                 {
                     foreach (var p in proposals) library.Create(templateSource, Baseline, p.Parameters, p.Explain(Baseline));
@@ -165,7 +167,7 @@ namespace AdaptiveTradingLab.Desktop
         {
             try
             {
-                RequireBaseline(); AdaptationEngine.Propose(Baseline); var inv = CultureInfo.InvariantCulture;
+                RequireBaseline(); AdaptationEngine.ValidateBaseline(Baseline); var inv = CultureInfo.InvariantCulture;
                 var p = new StrategyParameters { Fast = int.Parse(Get<TextBox>("FastBox").Text, inv), Slow = int.Parse(Get<TextBox>("SlowBox").Text, inv), Filter = int.Parse(Get<TextBox>("FilterBox").Text, inv), Adx = double.Parse(Get<TextBox>("AdxBox").Text, inv), Stop = double.Parse(Get<TextBox>("StopBox").Text, inv), Target = double.Parse(Get<TextBox>("TargetBox").Text, inv) };
                 p.Validate(); var version = library.Create(templateSource, Baseline, p, "User-controlled 20-second candidate. " + AdaptationEngine.Changes(Baseline.Parameters, p) + ". Benefit unmeasured; backtest before adoption."); RefreshVersions(version.Id);
                 Text("StatusText", "Custom version staged in the library. No installed file changed.");
@@ -187,6 +189,8 @@ namespace AdaptiveTradingLab.Desktop
             {
                 var v = SelectedVersion; Text("VersionDetails", v == null ? "No candidate versions yet." : v.Label + "\n" + v.Parameters.Summary + "\n" + v.Description);
                 Get<TextBox>("VersionSourceBox").Text = v == null ? "" : library.ReadSource(v);
+                Text("RerunInstructions", v == null ? "Select a version to prepare its next backtest." :
+                    "NEXT BACKTEST: " + v.ClassName + "\n1. Install this separate version, then press F5 in NinjaScript Editor.\n2. Reopen Strategy Analyzer and select this exact name. Use Second / 20, the same contract, dates, quantity, session and fill settings as the baseline. Enable commission and slippage consistently for both runs.\n3. Run in NinjaTrader, then click Refresh here and compare completed trades and net results. If both runs have zero trades, check historical data and the NinjaTrader log before loosening further.\nThe app does not start Strategy Analyzer runs automatically. More trades alone do not qualify a version as an improvement.");
             }
             catch (Exception e) { FeatureError(e); }
         }

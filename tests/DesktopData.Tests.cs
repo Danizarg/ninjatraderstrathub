@@ -42,12 +42,19 @@ public static class Tests {
  bh.SourceHash="different";Check(!AdaptationEngine.Validated(a,b,ah,bh),"Changed source");bh.SourceHash=b.SourceHash;
  ah.Parameters.Adx=30;Check(!AdaptationEngine.Validated(a,b,ah,bh),"Changed parameters");ah.Parameters=P();
  b.SettingsKey="different";Check(AdaptationEngine.Compare(a,b).StartsWith("NOT COMPARABLE"),"Mismatch comparison");b.SettingsKey=a.SettingsKey;
+ a.Trades=0; var recovery=AdaptationEngine.Loosen(a);
+ Check(recovery.Count==3 && recovery.All(x=>x.Parameters.Stop==a.Parameters.Stop && x.Parameters.Target==a.Parameters.Target),"Recovery preserves brackets");
+ Check(recovery[0].Parameters.Adx==15 && recovery[1].Parameters.Adx==0 && recovery[2].Parameters.Fast<a.Parameters.Fast,"Recovery loosens entries");
+ Check(recovery.All(x=>x.Explain(a).Contains("ZERO TRADES")),"Missing-data diagnosis absent");
+ Reject(()=>AdaptationEngine.Propose(a),"Small sample performance proposal accepted");
+ a.Parameters.Adx=0;a.Parameters.Fast=1;a.Parameters.Slow=2;Check(AdaptationEngine.Loosen(a).Count==0,"Minimum settings generated duplicates");a.Parameters=P();a.Trades=100;
  var proposals=AdaptationEngine.Propose(a);Check(proposals.Count==3&&proposals.All(p=>p.Explain(a).Contains("NOT YET KNOWN")),"Proposal honesty");
  a.BarsValue=60;Reject(()=>AdaptationEngine.Propose(a),"Other timeframe accepted");a.BarsValue=20;
  var invalid=P();invalid.Target=double.NaN;Reject(()=>invalid.Validate(),"NaN accepted");
  var library=new StrategyLibrary(Path.Combine(dir,"library"));string template=File.ReadAllText(Path.Combine(repo,"ninjatrader","Strategies","ATL_EMA_Trend.cs"));
  a.SourceHash=ah.SourceHash=NativeReports.Hash(template);
- var version=library.Create(template,a,proposals[0].Parameters,"Test candidate");string source=library.ReadSource(version);
+ a.Trades=0;
+ var version=library.Create(template,a,proposals[0].Parameters,"Test candidate");string source=library.ReadSource(version); a.Trades=100;
  Check(source.Contains("MinimumAdx = 25;")&&source.Contains("BarsPeriod.Value != 20")&&source.Contains("EnableRealtimeEntries = false;"),"Generation invariants");
  Check(NativeReports.SourceIdentity(source.Replace(version.ClassName,version.ClassName+"_2026_09_24_0"),version.ClassName)==version.SourceHash,"Dated candidate alias");
  Check(NativeReports.SourceIdentity(source.Replace("MinimumAdx = 25;","MinimumAdx = 26;"),version.ClassName)!=version.SourceHash,"Semantic source changes hidden");
@@ -83,7 +90,7 @@ public static class Tests {
  foreach(string snapshot in Directory.GetFiles(Path.GetDirectoryName(args[2]),"*.cs")) File.Copy(snapshot,Path.Combine(nt,"strategyanalyzerlogs",Path.GetFileName(snapshot)));
  await (Task)typeof(DesktopWindow).GetMethod("RefreshAll",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(desktop,null);
  Check(((ComboBox)desktop.Window.FindName("NativePicker")).Items.Count==1,"UI discovery");Check(((TextBlock)desktop.Window.FindName("NativeTrades")).Text==real.Trades.ToString("N0"),"Native KPI");
- typeof(DesktopWindow).GetMethod("Suggest",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(desktop,new object[]{true});Check(((ComboBox)desktop.Window.FindName("VersionPicker")).Items.Count==3,"Auto-create UI");
+ typeof(DesktopWindow).GetMethod("Suggest",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(desktop,new object[]{true,false});Check(((ComboBox)desktop.Window.FindName("VersionPicker")).Items.Count==3,"Auto-create UI");
  var pages=(TabControl)desktop.Window.FindName("Pages");
  foreach(int tab in new[]{0,1,2}) {
  pages.SelectedIndex=tab;

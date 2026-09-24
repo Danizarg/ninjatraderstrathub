@@ -78,7 +78,7 @@ namespace AdaptiveTradingLab.Desktop
         public StrategyVersion Create(string template, NativeBacktest baseline, StrategyParameters p, string description)
         {
             if (!baseline.IsTwentySeconds || baseline.Parameters == null) throw new InvalidDataException("A 20-second ATL baseline with parameters is required.");
-            AdaptationEngine.Propose(baseline);
+            AdaptationEngine.ValidateBaseline(baseline);
             bool known = baseline.Strategy == "ATL_EMA_Trend" && baseline.SourceHash == NativeReports.Hash(template);
             if (!known) known = ListVersions().Any(v => v.ClassName == baseline.Strategy && v.SourceHash == baseline.SourceHash);
             if (!known) throw new InvalidDataException("The baseline source snapshot is missing or differs from the supported strategy. Use the original saved XML and adjacent NinjaScript .cs snapshot in Strategy Analyzer logs; arbitrary edited strategies require manual review.");

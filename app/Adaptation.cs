@@ -171,11 +171,16 @@ namespace AdaptiveTradingLab.Desktop
     }
     public static class AdaptationEngine
     {
-        public static List<ImprovementProposal> Propose(NativeBacktest baseline)
+        public static void ValidateBaseline(NativeBacktest baseline)
         {
             if (!baseline.IsTwentySeconds || baseline.Parameters == null || baseline.Action != "Backtest" || !(baseline.Strategy == "ATL_EMA_Trend" || baseline.Strategy.StartsWith("ATL20_", StringComparison.Ordinal)))
                 throw new InvalidDataException("Select an ATL EMA-family backtest on 20-second bars. Other strategy code cannot be adapted by this engine.");
-            if (baseline.Trades < 50) throw new InvalidDataException("At least 50 completed trades are required to propose changes; collect more baseline data.");
+            baseline.Parameters.Validate();
+        }
+        public static List<ImprovementProposal> Propose(NativeBacktest baseline)
+        {
+            ValidateBaseline(baseline);
+            if (baseline.Trades < 50) throw new InvalidDataException("Use Loosen for more trades for a small sample. Performance suggestions require at least 50 completed trades.");
             var p = baseline.Parameters; var result = new List<ImprovementProposal>();
             if (p.Adx < 50)
             {
@@ -201,6 +206,31 @@ namespace AdaptiveTradingLab.Desktop
                     Expected = "Take profit at a smaller favorable move. Test whether a higher hit rate offsets smaller winners.",
                     Tradeoff = "Lower payoff per winner; tighter targets can reduce total profit even if win rate rises." });
             }
+            return result;
+        }
+        public static List<ImprovementProposal> Loosen(NativeBacktest baseline)
+        {
+            ValidateBaseline(baseline);
+            var p = baseline.Parameters;
+            var result = new List<ImprovementProposal>();
+            string evidence = baseline.Trades + " completed trades. This is an exploratory entry-frequency test, not evidence of profitability.";
+            if (baseline.Trades == 0) evidence += " ZERO TRADES: first verify a specific futures contract, available historical data, trading hours and NinjaTrader errors. Loosening cannot repair missing data.";
+            Action<string, StrategyParameters, string> add = (title, next, hypothesis) => {
+                next.Validate();
+                if (next.Key == p.Key || result.Any(x => x.Parameters.Key == next.Key)) return;
+                result.Add(new ImprovementProposal { Title = title, Parameters = next, Reason = evidence,
+                    Expected = hypothesis + " More executed trades are not guaranteed.",
+                    Tradeoff = "More noise, reversals, commissions and potential losses. Stop and target multipliers are unchanged. Keep 20-second bars and rerun in NinjaTrader." });
+            };
+            if (p.Adx > 0)
+            {
+                var next = p.Copy(); next.Adx = Math.Max(0, p.Adx - 5);
+                add("Loosen ADX filter", next, "Allow crossovers at a lower trend-strength threshold.");
+                next = p.Copy(); next.Adx = 0;
+                add("Diagnostic: disable ADX entry filter", next, "Test whether the ADX threshold is preventing entries; this is a diagnostic candidate.");
+            }
+            var faster = p.Copy(); faster.Fast = Math.Max(1, (int)Math.Floor(p.Fast * .75)); faster.Slow = Math.Max(faster.Fast + 1, (int)Math.Floor(p.Slow * .75));
+            add("Faster EMA crossover", faster, "Shorten the EMA windows to test more responsive entry signals, keeping the ADX threshold unchanged.");
             return result;
         }
         public static string Changes(StrategyParameters a, StrategyParameters b)
