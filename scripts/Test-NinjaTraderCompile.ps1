@@ -1,6 +1,7 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$NinjaTraderHome,
+    [string]$SourcePath,
     [string]$NinjaTraderBin = (Join-Path $env:ProgramFiles 'NinjaTrader 8\bin')
 )
 . "$PSScriptRoot\Common.ps1"
@@ -23,7 +24,8 @@ $output = Join-Path $script:RepoRoot 'artifacts\compile-check'
 New-Item -ItemType Directory -Force -Path $output | Out-Null
 $arguments = @('/nologo', '/target:library', '/platform:x64', ('/out:' + (Join-Path $output 'ATL.CompileCheck.dll')))
 foreach ($reference in $references) { $arguments += '/reference:' + $reference }
-$arguments += Join-Path $script:RepoRoot 'ninjatrader\Strategies\ATL_EMA_Trend.cs'
+if (-not $SourcePath) { $SourcePath = Join-Path $script:RepoRoot 'ninjatrader\Strategies\ATL_EMA_Trend.cs' }
+$arguments += $SourcePath
 & $compiler @arguments
 if ($LASTEXITCODE -ne 0) { throw 'NinjaTrader reference compilation failed.' }
 Write-Host 'PASS: strategy compiles against the installed NinjaTrader libraries (.NET Framework).'

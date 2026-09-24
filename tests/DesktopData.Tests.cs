@@ -1,56 +1,98 @@
-using System;
-using System.Globalization;
+﻿using System;
 using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Xml.Linq;
+using System.Globalization;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
 using AdaptiveTradingLab.Desktop;
+public static class Tests {
+ static int count;
+ static void Check(bool ok,string text) { if(!ok) throw new Exception(text); count++; }
+ static void Reject(Action action,string text) { bool rejected=false;try {action();}catch {rejected=true;}Check(rejected,text); }
+ static StrategyParameters P(){return new StrategyParameters{Fast=9,Slow=21,Filter=14,Adx=20,Stop=1.5,Target=2.5};}
+ static NativeBacktest R(bool better,bool later){return new NativeBacktest{Strategy=better?"ATL20_test":"ATL_EMA_Trend",Instrument="TEST",Currency="USD",Action="Backtest",BarsType=3,BarsValue=20,From=new DateTime(2025,later?4:1,1),To=new DateTime(2025,later?6:3,28),CostsIncluded=true,Commission=40,Slippage=1,Trades=100,Net=better?200:100,Drawdown=better?40:80,AverageTrade=better?2:1,WinRate=50,TradesPerDay=2,SettingsKey="matching",Parameters=P(),SourceHash=better?"changed":"original",ReportHash=Guid.NewGuid().ToString()};}
+ static string Fixture(string dir) {
+ var root=new XElement("StrategyAnalyzerGridEntry",
+ new XElement("StrategyName","ATL_EMA_Trend"),new XElement("Instrument","TEST"),new XElement("Date","2025-07-01"),new XElement("From","2025-01-01"),new XElement("To","2025-03-28"),new XElement("IncludeCommission",true),new XElement("Slippage",1),new XElement("Action","Backtest"),
+ new XElement("DataSeries",new XElement("BarsPeriodTypeSerialize",3),new XElement("Value",20)),
+ new XElement("SummaryPerformances",new XElement("PerformanceUnit","Currency"),new XElement("Denomination","UsDollar"),new XElement("SummaryPerformancesSerialize","Commission;40|TotalNetProfit;100|MaxDrawdown;-80|TotalNumTrades;100|PercentProfitable;0.5|AverageTrade;1|AverageNumTradesPerDay;2|ProfitFactor;1.2")),
+ new XElement("StrategyTemplate","<Strategy><DefaultQuantity>1</DefaultQuantity><Calculate>OnBarClose</Calculate></Strategy>"));
+ foreach(string key in new[]{"EntryHandling","EntriesPerDirection","ExitOnSessionClose","ExitOnSessionCloseSeconds","FillType","FillTypeType","FillTypeValue","FillLimitOrdersOnTouch","IsBreakAtEod","IsTickReplay","MinBarsRequired","MaximumBarsLookBack","TradingHoursTemplate","SetOrderQuantity","StopTargetHandling"}) root.Add(new XElement(key,"1"));
+ string[] names={"FastPeriod","SlowPeriod","FilterPeriod","MinimumAdx","StopAtrMultiplier","TargetAtrMultiplier"},values={"9","21","14","20","1.5","2.5"};
+ var parameters=new XElement("Parameters");for(int i=0;i<names.Length;i++)parameters.Add(new XElement("ParameterWrapper",new XElement("Name",names[i]),new XElement("Value",values[i])));root.Add(parameters);
+ string file=Path.Combine(dir,"fixture.xml");new XDocument(new XElement("StrategyAnalyzerLog",root)).Save(file);return file;
+ }
+ [STAThread] public static int Main(string[] args) {int exit=0;var app=new Application{ShutdownMode=ShutdownMode.OnExplicitShutdown};app.Startup+=async(s,e)=>{try{await Run(args);Console.WriteLine("PASS: "+count+" checks.");}catch(Exception ex){Console.Error.WriteLine(ex);exit=1;}finally{app.Shutdown();}};app.Run();return exit;}
+ static async Task Run(string[] args){
+ string dir=Path.GetFullPath(args[0]),repo=Path.GetFullPath(args[1]);Directory.CreateDirectory(dir);
+ Environment.SetEnvironmentVariable("ATL_DESKTOP_DATA",Path.Combine(dir,"preview"));Environment.SetEnvironmentVariable("ATL_PREVIEW","1");
+ var fixture=NativeReports.Load(Fixture(dir));Check(fixture.IsTwentySeconds&&fixture.Trades==100&&fixture.Net==100&&fixture.Drawdown==80&&fixture.WinRate==50,"Fixture parser");
+ var a=R(false,false);var b=R(true,false);var ah=R(false,true);var bh=R(true,true);
+ Check(AdaptationEngine.Validated(a,b,ah,bh),"Matching validation");
+ b.Slippage=0;Check(!AdaptationEngine.Passes(a,b),"Slippage mismatch");b.Slippage=1;
+ b.Commission=0;Check(!AdaptationEngine.Passes(a,b),"Zero costs");b.Commission=40;
+ b.Trades=49;Check(!AdaptationEngine.Passes(a,b),"Insufficient sample");b.Trades=100;
+ b.Drawdown=81;Check(!AdaptationEngine.Passes(a,b),"Worse drawdown");b.Drawdown=40;
+ bh.From=a.To;Check(!AdaptationEngine.Validated(a,b,ah,bh),"Overlapping validation");bh.From=ah.From;
+ bh.SourceHash="different";Check(!AdaptationEngine.Validated(a,b,ah,bh),"Changed source");bh.SourceHash=b.SourceHash;
+ ah.Parameters.Adx=30;Check(!AdaptationEngine.Validated(a,b,ah,bh),"Changed parameters");ah.Parameters=P();
+ b.SettingsKey="different";Check(AdaptationEngine.Compare(a,b).StartsWith("NOT COMPARABLE"),"Mismatch comparison");b.SettingsKey=a.SettingsKey;
+ var proposals=AdaptationEngine.Propose(a);Check(proposals.Count==3&&proposals.All(p=>p.Explain(a).Contains("NOT YET KNOWN")),"Proposal honesty");
+ a.BarsValue=60;Reject(()=>AdaptationEngine.Propose(a),"Other timeframe accepted");a.BarsValue=20;
+ var invalid=P();invalid.Target=double.NaN;Reject(()=>invalid.Validate(),"NaN accepted");
+ var library=new StrategyLibrary(Path.Combine(dir,"library"));string template=File.ReadAllText(Path.Combine(repo,"ninjatrader","Strategies","ATL_EMA_Trend.cs"));
+ a.SourceHash=ah.SourceHash=NativeReports.Hash(template);
+ var version=library.Create(template,a,proposals[0].Parameters,"Test candidate");string source=library.ReadSource(version);
+ Check(source.Contains("MinimumAdx = 25;")&&source.Contains("BarsPeriod.Value != 20")&&source.Contains("EnableRealtimeEntries = false;"),"Generation invariants");
+ Check(NativeReports.SourceIdentity(source.Replace(version.ClassName,version.ClassName+"_2026_09_24_0"),version.ClassName)==version.SourceHash,"Dated candidate alias");
+ Check(NativeReports.SourceIdentity(source.Replace("MinimumAdx = 25;","MinimumAdx = 26;"),version.ClassName)!=version.SourceHash,"Semantic source changes hidden");
+ File.WriteAllText(Path.Combine(repo,"artifacts","generated-check.cs"),source);
+ Check(library.ListVersions().Count==1&&version.State=="Untested","Version persistence");Reject(()=>library.Recommend(version,a,b,ah,bh),"Wrong report recommended");
+ b.Strategy=bh.Strategy=version.ClassName;b.SourceHash=bh.SourceHash=version.SourceHash;b.Parameters=bh.Parameters=version.Parameters.Copy();
+ library.Recommend(version,a,b,ah,bh);Check(library.ListVersions()[0].EvidenceReportHashes.Length==4,"Evidence missing");
+ a.SourceHash=ah.SourceHash="replaced";Reject(()=>library.Recommend(version,a,b,ah,bh),"Changed baseline provenance");
+ string nt=Path.Combine(dir,"NinjaTrader 8"),custom=Path.Combine(nt,"bin","Custom");Directory.CreateDirectory(custom);File.WriteAllText(Path.Combine(custom,"NinjaTrader.Custom.csproj"),"<Project/>");
+ var folder=new StrategyFolder(nt,Path.Combine(dir,"backups"));folder.Save("Mine.cs","original",null);var file=folder.List().Single();
+ Reject(()=>folder.Save("Mine.cs","overwrite",null),"Import overwrote source");Reject(()=>folder.Save("../outside.cs","escape",null),"Path traversal");
+ folder.Save(file.RelativePath,"edited",file.Hash);folder.Restore(folder.Backups().First(x=>x.Reason=="Edit"));Check(folder.Read(folder.List().Single())=="original","Edit restore");
+ file=folder.List().Single();folder.Archive(file);Check(folder.List().Count==0,"Archive");folder.Restore(folder.Backups().First(x=>x.Reason=="Archive"));Check(folder.Read(folder.List().Single())=="original","Archive restore");
+ File.WriteAllText(Path.Combine(custom,"Strategies","Mine.cs"),"external edit");Reject(()=>folder.Save(file.RelativePath,"lost",file.Hash),"Concurrent edit overwritten");
+ string csv=Path.Combine(dir,"fills.csv");File.WriteAllText(csv,"schema_version,time,instrument,mode,price,quantity,market_position\r\n1,now,\"A,B\",Historical,100,1,Long\r\n1,unfinished");Check(LabData.LoadExecutions(csv).Single().Instrument=="A,B","CSV partial/quotes");
+ Check(LabData.ResolveNinjaTraderHome(Path.Combine(custom,"Strategies"))==nt,"Nested home");
+ string hostile=Path.Combine(dir,"hostile.xml");File.WriteAllText(hostile,"<!DOCTYPE foo [<!ENTITY x SYSTEM 'file:///C:/Windows/win.ini'>]><StrategyAnalyzerLog>&x;</StrategyAnalyzerLog>");Reject(()=>NativeReports.Load(hostile),"DTD accepted");
+ var desktop=new DesktopWindow();var settings=new WorkspaceSettings{NinjaTraderHome=nt,ExportsRoot=Path.Combine(dir,"empty")};typeof(DesktopWindow).GetField("settings",BindingFlags.NonPublic|BindingFlags.Instance).SetValue(desktop,settings);
+ await (Task)typeof(DesktopWindow).GetMethod("RefreshAll",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(desktop,null);
+ Check(((ComboBox)desktop.Window.FindName("NativePicker")).Items.Count==0,"Empty workspace fabricated results");
+ Directory.CreateDirectory(Path.Combine(nt,"strategyanalyzerlogs"));File.Copy(Path.Combine(dir,"fixture.xml"),Path.Combine(nt,"strategyanalyzerlogs","fixture.xml"));
+ await (Task)typeof(DesktopWindow).GetMethod("RefreshAll",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(desktop,null);
+ Check(((TextBlock)desktop.Window.FindName("NativeTrades")).Text==100.ToString("N0"),"Fixture UI metrics");
+ File.Delete(Path.Combine(nt,"strategyanalyzerlogs","fixture.xml"));
+ Check(desktop.Window.FindName("RunButton")==null&&desktop.Window.FindName("DemoOverviewTab")==null,"Demo UI survived");
+ if(args.Length>2&&File.Exists(args[2])){
+ var real=NativeReports.Load(args[2]);
+ var raw=XDocument.Load(args[2]).Descendants("SummaryPerformances").First(x=>(string)x.Element("PerformanceUnit")=="Currency");
+ var metrics=raw.Element("SummaryPerformancesSerialize").Value.Split('|').Select(x=>x.Split(';')).Where(x=>x.Length>=2).ToDictionary(x=>x[0],x=>x[1]);
+ Check(real.Trades==int.Parse(metrics["TotalNumTrades"],CultureInfo.InvariantCulture)&&real.Net==double.Parse(metrics["TotalNetProfit"],CultureInfo.InvariantCulture)&&real.Drawdown==Math.Abs(double.Parse(metrics["MaxDrawdown"],CultureInfo.InvariantCulture)),"Actual report metrics");Check(real.SourceHash==NativeReports.Hash(template),"Actual aliased source provenance");
+ Console.WriteLine("Actual report: "+real.Trades+" trades, "+real.Net+" "+real.Currency+", "+real.Timeframe);
+ Directory.CreateDirectory(Path.Combine(nt,"strategyanalyzerlogs"));File.Copy(args[2],Path.Combine(nt,"strategyanalyzerlogs","report.xml"));
+ foreach(string snapshot in Directory.GetFiles(Path.GetDirectoryName(args[2]),"*.cs")) File.Copy(snapshot,Path.Combine(nt,"strategyanalyzerlogs",Path.GetFileName(snapshot)));
+ await (Task)typeof(DesktopWindow).GetMethod("RefreshAll",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(desktop,null);
+ Check(((ComboBox)desktop.Window.FindName("NativePicker")).Items.Count==1,"UI discovery");Check(((TextBlock)desktop.Window.FindName("NativeTrades")).Text==real.Trades.ToString("N0"),"Native KPI");
+ typeof(DesktopWindow).GetMethod("Suggest",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(desktop,new object[]{true});Check(((ComboBox)desktop.Window.FindName("VersionPicker")).Items.Count==3,"Auto-create UI");
+ var pages=(TabControl)desktop.Window.FindName("Pages");
+ foreach(int tab in new[]{0,1,2}) {
+ pages.SelectedIndex=tab;
+ var visual=(FrameworkElement)desktop.Window.Content;visual.Measure(new Size(1184,806));visual.Arrange(new Rect(0,0,1184,806));visual.UpdateLayout();
+ var bitmap=new RenderTargetBitmap(1184,806,96,96,PixelFormats.Pbgra32);bitmap.Render(visual);var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));
+ using(var stream=File.Create(Path.Combine(repo,"artifacts","preview-"+tab+".png"))) encoder.Save(stream);
+ }
 
-public static class DesktopDataTests
-{
-    private static int checks;
-    private static void Assert(bool condition, string message) { checks++; if (!condition) throw new Exception(message); }
-    public static int Main(string[] args)
-    {
-        try
-        {
-            string root = args[0]; Directory.CreateDirectory(root);
-            string run = Path.Combine(root, "demo-export"); Directory.CreateDirectory(run);
-            // File order differs from exit-time order. Breakeven is not a winning trade.
-            File.WriteAllText(Path.Combine(run, "a.json"), Trade("third", "2026-01-03T10:00:00Z", 0));
-            File.WriteAllText(Path.Combine(run, "b.json"), Trade("second", "2026-01-02T10:00:00Z", 20));
-            File.WriteAllText(Path.Combine(run, "c.json"), Trade("first", "2026-01-01T10:00:00Z", -10));
-            File.WriteAllText(Path.Combine(run, "broken.json"), "{unfinished");
-            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("es-ES");
-            var result = LabData.LoadRun(root);
-            Assert(result.Trades.Count == 3 && result.Skipped == 1, "Malformed JSON must be counted and skipped");
-            Assert(result.Trades[0].Id == "first", "Trades must sort by exit time");
-            Assert(result.Net == 10 && result.Drawdown == 10, "Net P&L and drawdown calculation");
-            Assert(Math.Abs(result.WinRate - 100.0 / 3) < 0.0001, "Win rate includes breakeven denominator");
-            Assert(result.Equity.Count == 4 && result.Equity[0] == 0 && result.Equity[1] == -10, "Equity starts at zero");
-            Assert(result.Trades[0].Entry == 5000.25, "JSON number parsing is culture independent");
-            File.WriteAllText(Path.Combine(run, "null.json"), "null");
-            Assert(LabData.LoadRun(root).Skipped == 2, "Null JSON record must not abort the entire run");
-            Assert(LabData.LoadRun(Path.Combine(root, "missing")).Trades.Count == 0, "Empty workspace");
-            var csv = LabData.ReadCsv(new StringReader("a,b\r\n\"one, two\",\"say \"\"hi\"\"\"\r\n\"multi\nline\",ok\r\n\"partial"));
-            Assert(csv.Count == 3 && csv[1][0] == "one, two" && csv[1][1] == "say \"hi\"", "CSV quote and comma handling");
-            Assert(csv[2][0] == "multi\nline", "Quoted newlines and trailing partial record");
-            string executionFile = Path.Combine(root, "ATL_fixture.csv");
-            File.WriteAllText(executionFile, "schema_version,time,instrument,mode,price,quantity,market_position\r\n1,2026-01-01T12:00:00,ES 12-26,Historical,5000.25,1,Long\r\n1,unfinished");
-            var executions = LabData.LoadExecutions(executionFile);
-            Assert(executions.Count == 1 && executions[0].Price == "5000.25", "Read complete execution while file is being appended");
-            File.WriteAllText(executionFile, "wrong,header\r\n");
-            bool refused = false; try { LabData.LoadExecutions(executionFile); } catch (InvalidDataException) { refused = true; }
-            Assert(refused, "Reject incompatible execution schema");
-            Assert(LabData.QuoteArgument("D:\\folder with spaces\\") == "\"D:\\folder with spaces\\\\\"", "Quote trailing backslash");
-            Assert(LabData.QuoteArgument("a\"b") == "\"a\\\"b\"", "Quote embedded quote");
-            string ntRoot = Path.Combine(root, "NinjaTrader 8");
-            Directory.CreateDirectory(Path.Combine(ntRoot, "bin", "Custom"));
-            File.WriteAllText(Path.Combine(ntRoot, "bin", "Custom", "NinjaTrader.Custom.csproj"), "<Project />");
-            Assert(LabData.ResolveNinjaTraderHome(Path.Combine(ntRoot, "workspaces", "recovery", "template")) == ntRoot, "Recover NinjaTrader root from a selected template subfolder");
-            Console.WriteLine("PASS: " + checks + " desktop data checks."); return 0;
-        }
-        catch (Exception e) { Console.Error.WriteLine(e); return 1; }
-    }
-    private static string Trade(string id, string time, double net)
-    {
-        return "{\"tradeId\":\"" + id + "\",\"contract\":\"ES 12-26\",\"exitTimestamp\":\"" + time + "\",\"entryPrice\":5000.25,\"exitPrice\":5001.25,\"quantity\":1,\"netPnL\":" + net.ToString(CultureInfo.InvariantCulture) + "}";
-    }
+ }
+ Reject(()=>typeof(DesktopWindow).GetMethod("GuardStrategyWrite",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(desktop,new object[]{false}),"Preview allowed writes");desktop.Window.Close();
+ }
 }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -35,16 +35,14 @@ namespace AdaptiveTradingLab.Desktop
             catch (Exception e) { MessageBox.Show(e.ToString(), "Unable to open Adaptive Trading Lab", MessageBoxButton.OK, MessageBoxImage.Error); Environment.ExitCode = 1; }
         }
     }
-    public sealed class DesktopWindow
+    public sealed partial class DesktopWindow
     {
         public Window Window { get; private set; }
-        private readonly string repo = AppDomain.CurrentDomain.BaseDirectory;
-        private readonly string settingsFile = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AdaptiveTradingLab", "desktop-settings.json");
-        private readonly CultureInfo usd = CultureInfo.GetCultureInfo("en-US");
+        private readonly string settingsFile = System.IO.Path.Combine(DesktopDataRoot(), "desktop-settings.json");
+        private static string DesktopDataRoot() { return Environment.GetEnvironmentVariable("ATL_DESKTOP_DATA") ?? System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AdaptiveTradingLab"); }
         private WorkspaceSettings settings;
-        private RunResult current = new RunResult();
         private bool busy;
-        private int runVersion, executionVersion;
+        private int executionVersion;
         private string startupWarning;
 
         private T Get<T>(string name) where T : FrameworkElement { return (T)Window.FindName(name); }
@@ -77,27 +75,22 @@ namespace AdaptiveTradingLab.Desktop
                 {
                     var saved = new JavaScriptSerializer().Deserialize<WorkspaceSettings>(File.ReadAllText(settingsFile));
                     if (saved == null) throw new InvalidDataException("Empty settings file.");
-                    saved.OutputRoot = ValidPath(saved.OutputRoot); saved.ExportsRoot = ValidPath(saved.ExportsRoot); saved.NinjaTraderHome = LabData.ResolveNinjaTraderHome(ValidPath(saved.NinjaTraderHome));
+                    saved.ExportsRoot = ValidPath(saved.ExportsRoot); saved.NinjaTraderHome = LabData.ResolveNinjaTraderHome(ValidPath(saved.NinjaTraderHome));
                     settings = saved;
                 }
             }
             catch (Exception e) { startupWarning = "Saved folders could not be read; using defaults. " + e.Message; }
-            Get<TextBox>("OutputPathBox").Text = settings.OutputRoot;
             Get<TextBox>("NtPathBox").Text = settings.NinjaTraderHome;
             Get<TextBox>("ExportPathBox").Text = settings.ExportsRoot;
-            Get<Button>("RunButton").Click += async (s, e) => await RunDemo();
             Get<Button>("RefreshButton").Click += async (s, e) => await RefreshAll();
             Get<Button>("InstallButton").Click += async (s, e) => await Install();
             Get<Button>("SaveSettingsButton").Click += async (s, e) => { try { SaveFolders(); await RefreshAll(); Log("Workspace folders saved."); } catch (Exception ex) { Error(ex); } };
-            Get<Button>("BrowseOutputButton").Click += (s, e) => Browse("OutputPathBox");
             Get<Button>("BrowseNtButton").Click += (s, e) => Browse("NtPathBox");
             Get<Button>("BrowseExportsButton").Click += (s, e) => Browse("ExportPathBox");
-            Get<Button>("OpenRunButton").Click += (s, e) => { var selected = Get<ComboBox>("RunPicker").SelectedItem as FileChoice; if (selected != null) OpenFolder(selected.Path); };
             Get<Button>("OpenNtButton").Click += (s, e) => { try { OpenFolder(System.IO.Path.Combine(ValidPath(Get<TextBox>("NtPathBox").Text), "bin", "Custom", "Strategies")); } catch (Exception ex) { Error(ex); } };
             Get<Button>("OpenExportsButton").Click += (s, e) => OpenFolder(settings.ExportsRoot);
-            Get<ComboBox>("RunPicker").SelectionChanged += async (s, e) => await LoadSelectedRun();
             Get<ComboBox>("ExecutionPicker").SelectionChanged += async (s, e) => await LoadSelectedExecutions();
-            Get<Canvas>("EquityCanvas").SizeChanged += (s, e) => DrawEquity();
+            InitializeAdaptation();
             Window.Loaded += async (s, e) => { Log("Desktop ready. No orders or account commands are sent by this app."); if (startupWarning != null) Log(startupWarning); await RefreshAll(); };
             Window.Closing += (s, e) => { if (busy) { e.Cancel = true; Text("StatusText", "Please wait for the current operation to finish before closing."); } };
         }
@@ -110,7 +103,7 @@ namespace AdaptiveTradingLab.Desktop
         }
         private void SaveFolders()
         {
-            var candidate = new WorkspaceSettings { OutputRoot = ValidPath(Get<TextBox>("OutputPathBox").Text), ExportsRoot = ValidPath(Get<TextBox>("ExportPathBox").Text), NinjaTraderHome = LabData.ResolveNinjaTraderHome(ValidPath(Get<TextBox>("NtPathBox").Text)) };
+            var candidate = new WorkspaceSettings { ExportsRoot = ValidPath(Get<TextBox>("ExportPathBox").Text), NinjaTraderHome = LabData.ResolveNinjaTraderHome(ValidPath(Get<TextBox>("NtPathBox").Text)) };
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(settingsFile));
             string temp = settingsFile + "." + Guid.NewGuid().ToString("N") + ".tmp";
             File.WriteAllText(temp, new JavaScriptSerializer().Serialize(candidate));
@@ -146,51 +139,9 @@ namespace AdaptiveTradingLab.Desktop
         private void SetBusy(bool value, string status)
         {
             busy = value;
-            foreach (string name in new[] { "RunButton", "RefreshButton", "InstallButton", "SaveSettingsButton", "BrowseOutputButton", "BrowseNtButton", "BrowseExportsButton" }) Get<Button>(name).IsEnabled = !value;
+            foreach (string name in new[] { "RefreshButton", "InstallButton", "SaveSettingsButton", "BrowseNtButton", "BrowseExportsButton" }) Get<Button>(name).IsEnabled = !value;
             Get<ProgressBar>("BusyBar").Visibility = value ? Visibility.Visible : Visibility.Collapsed;
             Text("StatusText", status);
-        }
-        private async Task<string> RunScript(string script, params string[] arguments)
-        {
-            string path = System.IO.Path.Combine(repo, "scripts", script);
-            if (!File.Exists(path)) throw new FileNotFoundException("The app must stay with its scripts and vendor folders. Extract the complete download.", path);
-            var args = new List<string> { "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", path };
-            args.AddRange(arguments);
-            string powershell = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe");
-            return await Task.Run(async () => {
-                using (var process = new Process())
-                {
-                    process.StartInfo = new ProcessStartInfo { FileName = powershell, Arguments = string.Join(" ", args.Select(LabData.QuoteArgument)),
-                        WorkingDirectory = repo, UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
-                    // A launch from PowerShell 7 can carry its incompatible module paths into
-                    // Windows PowerShell. These scripts use the built-in Windows modules only.
-                    process.StartInfo.EnvironmentVariables["PSModulePath"] = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(powershell), "Modules")
-                        + ";" + System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "WindowsPowerShell", "Modules");
-                    process.Start();
-                    Task<string> output = process.StandardOutput.ReadToEndAsync();
-                    Task<string> error = process.StandardError.ReadToEndAsync();
-                    await Task.WhenAll(output, error);
-                    process.WaitForExit();
-                    string text = output.Result + (string.IsNullOrWhiteSpace(error.Result) ? "" : Environment.NewLine + error.Result);
-                    if (process.ExitCode != 0) throw new InvalidOperationException("Operation failed (exit " + process.ExitCode + ").\n" + text);
-                    return text;
-                }
-            });
-        }
-        private async Task RunDemo()
-        {
-            if (busy) return;
-            SetBusy(true, "Running synthetic demo… First launch also prepares the bundled runtime.");
-            try
-            {
-                Log("Starting synthetic demo.");
-                Log(await RunScript("Start-Lab.ps1", "-OutputRoot", settings.OutputRoot));
-                await RefreshAll(true);
-                Get<TabControl>("Pages").SelectedIndex = 0;
-                Text("StatusText", "Demo complete. Synthetic results are ready.");
-            }
-            catch (Exception e) { Error(e); }
-            finally { SetBusy(false, Get<TextBlock>("StatusText").Text); }
         }
         private async Task Install()
         {
@@ -198,19 +149,19 @@ namespace AdaptiveTradingLab.Desktop
             SetBusy(true, "Installing NinjaTrader strategy…");
             try
             {
+                GuardStrategyWrite(true);
                 string ntFolder = LabData.ResolveNinjaTraderHome(ValidPath(Get<TextBox>("NtPathBox").Text));
                 if (!File.Exists(System.IO.Path.Combine(ntFolder, "bin", "Custom", "NinjaTrader.Custom.csproj")))
                     throw new DirectoryNotFoundException("Select your NinjaTrader user folder, normally Documents\\NinjaTrader 8. A chart template or the Program Files installation folder cannot be used here.");
                 Get<TextBox>("NtPathBox").Text = ntFolder;
                 SaveFolders();
-                string source = System.IO.Path.Combine(repo, "ninjatrader", "Strategies", "ATL_EMA_Trend.cs");
-                string target = System.IO.Path.Combine(settings.NinjaTraderHome, "bin", "Custom", "Strategies", "ATL_EMA_Trend.cs");
-                bool replace = File.Exists(target) && File.ReadAllText(source) != File.ReadAllText(target);
-                if (replace && MessageBox.Show(Window, "An existing ATL_EMA_Trend.cs differs. Back it up and replace it with this version? Close any editor tab for this file first.", "Update strategy", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) { Text("StatusText", "Strategy update cancelled."); return; }
-                var args = new List<string> { "-NinjaTraderHome", settings.NinjaTraderHome };
-                if (replace) args.Add("-ReplaceExisting");
-                Log(await RunScript("Install-NinjaTrader.ps1", args.ToArray()));
+                var folder = Folder();
+                var existing = folder.List().FirstOrDefault(f => f.RelativePath.Equals("ATL_EMA_Trend.cs", StringComparison.OrdinalIgnoreCase));
+                if (existing != null && folder.Read(existing) == templateSource) { Text("StatusText", "Strategy is already installed."); return; }
+                if (existing != null && MessageBox.Show(Window, "Back up and replace ATL_EMA_Trend.cs with the bundled source?", "Update strategy", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+                folder.Save("ATL_EMA_Trend.cs", templateSource, existing == null ? null : existing.Hash);
                 CheckNinjaTrader();
+                await RefreshNativeReports();
                 Text("StatusText", "Strategy installed. In NinjaTrader, open NinjaScript Editor and press F5.");
             }
             catch (Exception e) { Error(e); }
@@ -226,67 +177,22 @@ namespace AdaptiveTradingLab.Desktop
             Text("NtBadge", found ? (running ? "●  NinjaTrader detected · running" : "●  NinjaTrader detected · closed") : "○  NinjaTrader folder not found");
             Text("InstallStatus", !found ? "Choose your NinjaTrader Documents folder below." : installed ? "Strategy source installed. Compilation status is checked inside NinjaTrader." : "NinjaTrader found. The ATL strategy has not been installed here yet.");
         }
-        private async Task RefreshAll(bool newest = false)
+        private async Task RefreshAll()
         {
             try
             {
                 CheckNinjaTrader();
-                var runs = Get<ComboBox>("RunPicker"); var executions = Get<ComboBox>("ExecutionPicker");
-                var oldRun = runs.SelectedItem as FileChoice; var oldExecution = executions.SelectedItem as FileChoice;
-                string outputRoot = settings.OutputRoot, exportsRoot = settings.ExportsRoot;
-                var runList = await Task.Run(() => LabData.Runs(outputRoot));
-                var exportList = await Task.Run(() => LabData.ExecutionFiles(exportsRoot));
-                runs.ItemsSource = runList; executions.ItemsSource = exportList;
-                runs.SelectedItem = (!newest && oldRun != null ? runList.FirstOrDefault(r => r.Path == oldRun.Path) : null) ?? runList.FirstOrDefault();
-                executions.SelectedItem = (oldExecution != null ? exportList.FirstOrDefault(r => r.Path == oldExecution.Path) : null) ?? exportList.FirstOrDefault();
-                // Explicit loads also refresh a currently selected file that has grown on disk.
-                await LoadSelectedRun(); await LoadSelectedExecutions();
-                if (!busy) Text("StatusText", "Updated " + DateTime.Now.ToString("HH:mm:ss") + " · Local files only. Click Refresh after new executions.");
+                await RefreshNativeReports();
+                var executions = Get<ComboBox>("ExecutionPicker");
+                var old = executions.SelectedItem as FileChoice;
+                string exports = settings.ExportsRoot;
+                var files = await Task.Run(() => LabData.ExecutionFiles(exports));
+                executions.ItemsSource = files;
+                executions.SelectedItem = (old == null ? null : files.FirstOrDefault(f => f.Path == old.Path)) ?? files.FirstOrDefault();
+                await LoadSelectedExecutions();
+                if (!busy) Text("StatusText", "Updated " + DateTime.Now.ToString("HH:mm:ss") + " · Saved NinjaTrader backtests and execution files.");
             }
             catch (Exception e) { Error(e); }
-        }
-        private async Task LoadSelectedRun()
-        {
-            int version = ++runVersion;
-            var selected = Get<ComboBox>("RunPicker").SelectedItem as FileChoice;
-            Get<Button>("OpenRunButton").IsEnabled = selected != null;
-            try
-            {
-                var result = selected == null ? new RunResult() : await Task.Run(() => LabData.LoadRun(selected.Path));
-                string learning = "No run selected";
-                if (selected != null)
-                {
-                    learning = "Status not recorded for this older run";
-                    string metadata = System.IO.Path.Combine(selected.Path, "desktop-run.json");
-                    if (File.Exists(metadata))
-                    {
-                        try { var info = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(metadata)); learning = "Demo: " + Convert.ToString(info["learningStatus"]); }
-                        catch { learning = "Run status could not be read"; }
-                    }
-                }
-                if (version != runVersion) return;
-                current = result;
-                Text("PnlText", selected == null ? "—" : result.Net.ToString("C2", usd));
-                Text("CountText", selected == null ? "—" : result.Trades.Count.ToString("N0"));
-                Text("WinText", selected == null ? "—" : result.WinRate.ToString("0.0") + "%");
-                Text("DrawdownText", selected == null ? "—" : result.Drawdown.ToString("C2", usd));
-                Text("LearningText", learning);
-                Get<DataGrid>("TradesGrid").ItemsSource = result.Trades;
-                Get<TextBlock>("ChartEmpty").Visibility = result.Trades.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-                if (result.Skipped > 0) { Log("Skipped " + result.Skipped + " unreadable trade records in " + selected.Path); Text("LearningText", learning + " · " + result.Skipped + " records skipped; totals are partial"); }
-                DrawEquity();
-            }
-            catch (Exception e)
-            {
-                if (version == runVersion)
-                {
-                    current = new RunResult();
-                    Get<DataGrid>("TradesGrid").ItemsSource = null;
-                    foreach (string name in new[] { "PnlText", "CountText", "WinText", "DrawdownText" }) Text(name, "—");
-                    Text("LearningText", "Unable to read this run");
-                    DrawEquity(); Error(e);
-                }
-            }
         }
         private async Task LoadSelectedExecutions()
         {
@@ -301,34 +207,6 @@ namespace AdaptiveTradingLab.Desktop
                 Get<TextBlock>("ExportsEmpty").Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             }
             catch (Exception e) { if (version == executionVersion) { Get<DataGrid>("ExecutionsGrid").ItemsSource = null; Text("ExecutionCount", "Unable to read file"); Error(e); } }
-        }
-        private void DrawEquity()
-        {
-            var canvas = Get<Canvas>("EquityCanvas"); canvas.Children.Clear();
-            if (current.Trades.Count == 0 || canvas.ActualWidth < 100 || canvas.ActualHeight < 50) return;
-            double left = 78, right = canvas.ActualWidth - 12, top = 10, bottom = canvas.ActualHeight - 28;
-            double min = current.Equity.Min(), max = current.Equity.Max();
-            if (max - min < 0.01) { min -= 1; max += 1; }
-            double padding = (max - min) * 0.08; min -= padding; max += padding;
-            var muted = (Brush)new BrushConverter().ConvertFromString("#8294AF");
-            for (int i = 0; i < 4; i++)
-            {
-                double y = top + (bottom - top) * i / 3;
-                canvas.Children.Add(new Line { X1 = left, X2 = right, Y1 = y, Y2 = y, Stroke = (Brush)new BrushConverter().ConvertFromString("#2A384C"), StrokeThickness = 1 });
-                var label = new TextBlock { Text = (max - (max - min) * i / 3).ToString("C0", usd), Foreground = muted, FontSize = 11 };
-                Canvas.SetTop(label, y - 8); canvas.Children.Add(label);
-            }
-            var line = new Polyline { Stroke = (Brush)new BrushConverter().ConvertFromString("#62E2BD"), StrokeThickness = 2.5 };
-            var area = new Polygon { Fill = (Brush)new BrushConverter().ConvertFromString("#183DD9AD") };
-            area.Points.Add(new Point(left, bottom));
-            for (int i = 0; i < current.Equity.Count; i++)
-            {
-                var point = new Point(left + (right - left) * i / (current.Equity.Count - 1), bottom - (current.Equity[i] - min) / (max - min) * (bottom - top));
-                line.Points.Add(point); area.Points.Add(point);
-            }
-            area.Points.Add(new Point(right, bottom)); canvas.Children.Add(area); canvas.Children.Add(line);
-            var start = new TextBlock { Text = "START", FontSize = 11, Foreground = muted }; Canvas.SetLeft(start, left); Canvas.SetTop(start, bottom + 10); canvas.Children.Add(start);
-            var end = new TextBlock { Text = current.Trades.Count + " TRADES", FontSize = 11, Foreground = muted }; Canvas.SetRight(end, 12); Canvas.SetTop(end, bottom + 10); canvas.Children.Add(end);
         }
     }
 }

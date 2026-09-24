@@ -1,6 +1,6 @@
-# Runs without Pester or an SDK; compatible with Windows PowerShell 5.1.
+﻿# Runs without Pester or an SDK; compatible with Windows PowerShell 5.1.
 [CmdletBinding()]
-param([switch]$SkipDemo)
+param()
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 $testRoot = Join-Path $repo ('artifacts\test with spaces ' + [Guid]::NewGuid().ToString('N'))
@@ -31,14 +31,4 @@ Assert ((Get-Content $target -Raw).Contains('Existing user customization')) 'Use
 $refused = $false
 try { & $installer -NinjaTraderHome (Join-Path $testRoot 'missing') } catch { $refused = $true }
 Assert $refused 'Installer accepted an invalid NinjaTrader folder'
-if (-not $SkipDemo) {
-    & (Join-Path $repo 'scripts\Start-Lab.ps1') -OutputRoot (Join-Path $testRoot 'demo output')
-    $runs = @(Get-ChildItem (Join-Path $testRoot 'demo output\runs') -Directory)
-    Assert ($runs.Count -eq 1) 'Demo did not create exactly one run'
-    $trades = @(Get-ChildItem (Join-Path $runs[0].FullName 'demo-export') -Filter '*.json')
-    Assert ($trades.Count -eq 100) 'Demo did not generate 100 synthetic records'
-    Assert (Test-Path (Join-Path $runs[0].FullName 'ninjatrader\Strategies\ATL_ES_EMA_Trend_v1.cs')) 'Demo did not generate NinjaScript'
-    $metadata = Get-Content -LiteralPath (Join-Path $runs[0].FullName 'desktop-run.json') -Raw | ConvertFrom-Json
-    Assert ($metadata.learningStatus -eq 'INSUFFICIENT_DATA') 'Desktop run status was not preserved'
-}
-Write-Host 'PASS: script parsing, WhatIf, installation, idempotency, overwrite protection, invalid path, and demo checks.'
+Write-Host 'PASS: script parsing, WhatIf, installation, idempotency, overwrite protection and invalid path.'
